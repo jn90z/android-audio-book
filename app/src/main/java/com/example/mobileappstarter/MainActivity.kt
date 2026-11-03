@@ -17,7 +17,6 @@ import android.graphics.Bitmap
 import android.text.SpannableString
 import android.text.style.BackgroundColorSpan
 import android.text.Spanned
-import android.speech.tts.UtteranceProgressListener
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
