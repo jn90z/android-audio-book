@@ -1,6 +1,8 @@
 package com.example.mobileappstarter
 
 import android.content.Intent
+import android.media.MediaPlayer
+import java.io.File
 import android.provider.OpenableColumns
 import org.json.JSONArray
 import android.os.Bundle
@@ -68,6 +70,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var documentId = ""
     private lateinit var bookLibrary: BookLibrary
     private var generation = 0
+    private var mp3Player: MediaPlayer? = null
+    private var mp3Playing = false
+    private lateinit var mp3Button: Button
+    private val selectMp3 = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importMp3(uri)
+    }
 
     private val openPdf = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) importPdf(uri)
@@ -224,6 +232,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         voiceButton = button("Voice ▾") { chooseVoice() }
         settingsRow.addView(voiceButton)
         bottomControls.addView(settingsRow)
+        mp3Button = button("Import / Play MP3") { showMp3Menu() }
+        bottomControls.addView(mp3Button)
         bottomControls.addView(button("🧪  Neural voice laboratory") {
             if (reading) pause()
             TtsExperiment.show(this, tts) { installNarrationListener() }
@@ -280,6 +290,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun showLibrary() {
         pause()
+        pauseMp3()
         readerPanel.visibility = View.GONE
         libraryScroll.visibility = View.VISIBLE
     }
@@ -302,11 +313,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun openBook(book: LocalBook) {
         pause()
+        releaseMp3()
         val request = ++generation
         activeBook = book
         documentId = book.id
         pageNumber = 0
         showPage(0)
+        mp3Button.text = if (mp3File(book).exists()) "MP3 narration available" else "Import / Play MP3"
         bookTitle.text = book.title
         readerHeader.text = book.title
         showReader()
@@ -573,6 +586,93 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Selection does not resume automatically: preview and playback must not overlap.
     }
 
+    private fun mp3File(book: LocalBook): File =
+        File(File(filesDir, "book-audio"), book.id.replace(Regex("[^a-zA-Z0-9_-]"), "_") + ".mp3")
+
+    private fun showMp3Menu() {
+        val book = activeBook ?: return
+        val choices = if (mp3File(book).exists())
+            arrayOf("Play / resume MP3", "Pause MP3", "Replace MP3", "Use Android narration")
+        else arrayOf("Import downloaded MP3")
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Audio for " + book.title)
+            .setMessage("MP3 playback works offline after import. Page navigation remains manual; automatic word highlighting and page synchronization are not available for imported audio yet.")
+            .setItems(choices) { _, choice ->
+                if (!mp3File(book).exists()) selectMp3.launch(arrayOf("audio/*"))
+                else when (choice) {
+                    0 -> playMp3()
+                    1 -> pauseMp3()
+                    2 -> selectMp3.launch(arrayOf("audio/*"))
+                    3 -> { pauseMp3(); status.text = "Android narration ready" }
+                }
+            }.setNegativeButton("Close", null).show()
+    }
+
+    private fun importMp3(uri: Uri) {
+        val book = activeBook ?: return
+        val request = generation
+        lifecycleScope.launch {
+            try {
+                val target = mp3File(book)
+                withContext(Dispatchers.IO) {
+                    target.parentFile?.mkdirs()
+                    val temporary = File(target.parentFile, target.name + ".part")
+                    try {
+                        contentResolver.openInputStream(uri)?.use { input ->
+                            temporary.outputStream().use { output -> input.copyTo(output) }
+                        } ?: error("Could not read selected audio")
+                        if (!temporary.renameTo(target)) {
+                            temporary.copyTo(target, overwrite = true)
+                        }
+                    } finally {
+                        temporary.delete()
+                    }
+                }
+                if (request == generation && activeBook?.id == book.id) {
+                    releaseMp3()
+                    mp3Button.text = "MP3 narration available"
+                    status.text = "MP3 imported. Tap MP3 narration to play."
+                }
+            } catch (error: Exception) {
+                if (request == generation) status.text = "MP3 import failed: " + error.localizedMessage
+            }
+        }
+    }
+
+    private fun playMp3() {
+        val book = activeBook ?: return
+        pause()
+        try {
+            if (mp3Player == null) {
+                mp3Player = MediaPlayer().apply {
+                    setDataSource(mp3File(book).absolutePath)
+                    prepare()
+                    setOnCompletionListener {
+                        mp3Playing = false
+                        status.text = "MP3 finished"
+                    }
+                }
+            }
+            mp3Player?.start()
+            mp3Playing = true
+            status.text = "Playing imported MP3 • PDF pages are manual"
+        } catch (error: Exception) {
+            releaseMp3()
+            status.text = "MP3 playback failed: " + error.localizedMessage
+        }
+    }
+
+    private fun pauseMp3() {
+        if (mp3Playing) mp3Player?.pause()
+        mp3Playing = false
+    }
+
+    private fun releaseMp3() {
+        mp3Player?.release()
+        mp3Player = null
+        mp3Playing = false
+    }
+
     private fun currentId() = "$generation:$position"
     private fun speak() {
         if (!initialized || position !in chunks.indices) return
@@ -586,6 +686,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         updateProgress()
     }
     private fun start() {
+        pauseMp3()
         if (!initialized) { status.text = "Speech engine unavailable. Check installed voice data."; return }
         if (chunks.isEmpty()) return
         if (position >= chunks.size) position = 0
@@ -642,6 +743,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
+        releaseMp3()
         pause()
         tts.shutdown()
         super.onDestroy()
