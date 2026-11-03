@@ -1,6 +1,8 @@
 package com.example.mobileappstarter
 
 import android.content.Intent
+import android.provider.OpenableColumns
+import org.json.JSONArray
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
@@ -23,6 +25,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var progress: TextView
     private lateinit var play: Button
     private lateinit var speedLabel: TextView
+    private lateinit var library: LinearLayout
+    private lateinit var bookTitle: TextView
+    private lateinit var overall: ProgressBar
     private var chunks = emptyList<String>()
     private var position = 0
     private var reading = false
@@ -41,20 +46,28 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         tts = TextToSpeech(this, this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(28, 36, 28, 24)
+            setPadding(24, 28, 24, 32)
             setBackgroundColor(0xff151820.toInt())
         }
         fun label(value: String, size: Float = 16f): TextView =
             TextView(this).apply { text = value; textSize = size; setTextColor(0xfff2f3f7.toInt()); setPadding(0, 8, 0, 8) }
         fun button(value: String, action: () -> Unit): Button =
             Button(this).apply { text = value; setOnClickListener { action() } }
+        root.addView(label("MY LIBRARY", 13f))
         root.addView(label("Audio Book", 30f))
         root.addView(label("Free • Offline • No account", 14f))
-        root.addView(button("Import PDF") { openPdf.launch(arrayOf("application/pdf")) })
+        root.addView(button("＋  Add a PDF") { openPdf.launch(arrayOf("application/pdf")) })
+        library = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        root.addView(library)
+        root.addView(label("NOW READING", 13f))
+        bookTitle = label("No book selected", 22f)
+        root.addView(bookTitle)
         status = label("Choose a text-based PDF to start.")
         progress = label("")
         root.addView(status)
         root.addView(progress)
+        overall = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 1000; progress = 0 }
+        root.addView(overall)
         val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         controls.addView(button("Previous") { jump(-1) }, LinearLayout.LayoutParams(0, -2, 1f))
         play = button("Play") { if (reading) pause() else start() }
@@ -82,6 +95,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         root.addView(seek)
         val scroll = ScrollView(this).apply { addView(root) }
         setContentView(scroll)
+        refreshLibrary()
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(id: String?) {}
             override fun onError(id: String?) { runOnUiThread { if (id == currentId()) { pause(); status.text = "Speech playback failed." } } }
@@ -106,6 +120,11 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         pause()
         val request = ++generation
         documentId = uri.toString()
+        try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: SecurityException) {}
+        val name = displayName(uri)
+        bookTitle.text = name
+        rememberBook(uri, name)
+        refreshLibrary()
         chunks = emptyList()
         position = 0
         status.text = "Extracting PDF text…"
@@ -145,6 +164,41 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         return result
     }
 
+    private fun displayName(uri: Uri): String {
+        return try {
+            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                if (it.moveToFirst()) it.getString(0) else null
+            } ?: "Untitled PDF"
+        } catch (_: Exception) { "Untitled PDF" }
+    }
+
+    private fun rememberBook(uri: Uri, name: String) {
+        val prefs = getSharedPreferences("books", MODE_PRIVATE)
+        val books = try { JSONArray(prefs.getString("items", "[]")) } catch (_: Exception) { JSONArray() }
+        if ((0 until books.length()).none { books.optJSONObject(it)?.optString("uri") == uri.toString() }) {
+            books.put(org.json.JSONObject().put("uri", uri.toString()).put("title", name))
+            prefs.edit().putString("items", books.toString()).apply()
+        }
+    }
+
+    private fun refreshLibrary() {
+        library.removeAllViews()
+        val books = try { JSONArray(getSharedPreferences("books", MODE_PRIVATE).getString("items", "[]")) }
+                    catch (_: Exception) { JSONArray() }
+        if (books.length() == 0) {
+            library.addView(TextView(this).apply { text = "Your imported PDFs will appear here."; setTextColor(0xffadb7c9.toInt()); setPadding(0, 12, 0, 20) })
+        }
+        for (i in books.length() - 1 downTo 0) {
+            val book = books.optJSONObject(i) ?: continue
+            val uri = Uri.parse(book.optString("uri"))
+            library.addView(Button(this).apply {
+                text = "📖  " + book.optString("title", "Untitled PDF")
+                isAllCaps = false
+                setOnClickListener { importPdf(uri) }
+            })
+        }
+    }
+
     private fun currentId() = "$generation:$position"
     private fun speak() {
         if (!initialized || position !in chunks.indices) return
@@ -178,6 +232,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
     private fun updateProgress() {
         progress.text = if (chunks.isEmpty()) "" else "Section ${position.coerceAtMost(chunks.size - 1) + 1} of ${chunks.size}"
+        overall.progress = if (chunks.isEmpty()) 0 else ((position.coerceAtMost(chunks.size) * 1000L) / chunks.size).toInt()
     }
     override fun onInit(code: Int) {
         initialized = code == TextToSpeech.SUCCESS
