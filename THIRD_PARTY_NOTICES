@@ -1,0 +1,23 @@
+Mobile App Starter
+Copyright 2026 Joseph Niksa
+
+This product includes software developed for Mobile App Starter and is
+licensed under the Apache License, Version 2.0.
+
+THIRD-PARTY SOFTWARE
+
+This project depends on third-party software. Those components remain subject
+to their respective licenses and terms.
+
+The starter currently uses dependency families including AndroidX, AndroidX
+Credential Manager, AndroidX Test/Espresso, Google Identity/Google ID, Kotlin
+and kotlinx.coroutines, Gradle/Android Gradle Plugin, JUnit, TypeScript,
+Cloudflare Workers tooling/Wrangler, and GitHub Actions.
+
+Before distributing a production application derived from this starter,
+generate and review the application's resolved direct and transitive dependency
+license inventory. Preserve any complete license texts, copyright notices,
+NOTICE files, or other attribution required by those dependencies.
+
+Service terms for Google APIs, Google Play/Android services, Cloudflare, GitHub,
+or other hosted services are separate from this source-code license.

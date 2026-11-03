@@ -1,0 +1,10 @@
+.gradle/
+.idea/
+build/
+local.properties
+*.jks
+*.keystore
+edge/node_modules/
+edge/.wrangler/
+.env
+.env.*

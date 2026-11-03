@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mobile-app-starter-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "durable_objects": {
+    "bindings": [{ "name": "ROOMS", "class_name": "RealtimeRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["RealtimeRoom"] }],
+  "d1_databases": [
+    {
+      "binding": "APP_DB",
+      "database_name": "app-db",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "GOOGLE_WEB_CLIENT_ID": "REPLACE_WITH_GOOGLE_WEB_CLIENT_ID"
+  }
+}
