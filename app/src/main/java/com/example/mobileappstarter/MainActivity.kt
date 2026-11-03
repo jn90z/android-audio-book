@@ -8,6 +8,9 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.net.Uri
 import android.widget.*
+import android.graphics.BitmapFactory
+import android.view.Gravity
+import android.graphics.Color
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -34,6 +37,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var initialized = false
     private var speed = 1f
     private var documentId = ""
+    private lateinit var bookLibrary: BookLibrary
     private var generation = 0
 
     private val openPdf = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -43,6 +47,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         PDFBoxResourceLoader.init(applicationContext)
+        bookLibrary = BookLibrary(this)
         tts = TextToSpeech(this, this)
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -119,31 +124,42 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun importPdf(uri: Uri) {
         pause()
         val request = ++generation
-        documentId = uri.toString()
-        try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: SecurityException) {}
-        val name = displayName(uri)
-        bookTitle.text = name
-        rememberBook(uri, name)
-        refreshLibrary()
+        status.text = "Saving PDF to local library…"
+        lifecycleScope.launch {
+            try {
+                val book = withContext(Dispatchers.IO) { bookLibrary.import(uri) }
+                if (request != generation) return@launch
+                refreshLibrary()
+                openBook(book)
+            } catch (e: Exception) {
+                if (request == generation) status.text = "Import failed: ${e.localizedMessage}"
+            }
+        }
+    }
+
+    private fun openBook(book: LocalBook) {
+        pause()
+        val request = ++generation
+        documentId = book.id
+        bookTitle.text = book.title
         chunks = emptyList()
         position = 0
-        status.text = "Extracting PDF text…"
+        status.text = "Loading PDF…"
         updateProgress()
         lifecycleScope.launch {
             try {
-                val extracted = withContext(Dispatchers.IO) {
-                    contentResolver.openInputStream(uri)?.use { input ->
-                        PDDocument.load(input).use { PDFTextStripper().getText(it) }
-                    } ?: error("Could not open file")
+                val text = withContext(Dispatchers.IO) {
+                    PDDocument.load(book.pdf).use { PDFTextStripper().getText(it) }
                 }
                 if (request != generation) return@launch
-                chunks = chunk(extracted)
-                position = getPreferences(MODE_PRIVATE).getInt(documentId, 0).coerceIn(0, (chunks.size - 1).coerceAtLeast(0))
-                status.text = if (chunks.isEmpty()) "No selectable text found. Scanned PDFs will require OCR."
+                chunks = chunk(text)
+                position = getPreferences(MODE_PRIVATE).getInt(documentId, 0)
+                    .coerceIn(0, (chunks.size - 1).coerceAtLeast(0))
+                status.text = if (chunks.isEmpty()) "No selectable text. OCR is planned."
                               else "Ready to listen • ${chunks.size} sections"
                 updateProgress()
             } catch (e: Exception) {
-                if (request == generation) status.text = "PDF import failed: ${e.localizedMessage}"
+                if (request == generation) status.text = "Load failed: ${e.localizedMessage}"
             }
         }
     }
@@ -164,38 +180,57 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         return result
     }
 
-    private fun displayName(uri: Uri): String {
-        return try {
-            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
-                if (it.moveToFirst()) it.getString(0) else null
-            } ?: "Untitled PDF"
-        } catch (_: Exception) { "Untitled PDF" }
-    }
-
-    private fun rememberBook(uri: Uri, name: String) {
-        val prefs = getSharedPreferences("books", MODE_PRIVATE)
-        val books = try { JSONArray(prefs.getString("items", "[]")) } catch (_: Exception) { JSONArray() }
-        if ((0 until books.length()).none { books.optJSONObject(it)?.optString("uri") == uri.toString() }) {
-            books.put(org.json.JSONObject().put("uri", uri.toString()).put("title", name))
-            prefs.edit().putString("items", books.toString()).apply()
-        }
-    }
-
     private fun refreshLibrary() {
         library.removeAllViews()
-        val books = try { JSONArray(getSharedPreferences("books", MODE_PRIVATE).getString("items", "[]")) }
-                    catch (_: Exception) { JSONArray() }
-        if (books.length() == 0) {
-            library.addView(TextView(this).apply { text = "Your imported PDFs will appear here."; setTextColor(0xffadb7c9.toInt()); setPadding(0, 12, 0, 20) })
-        }
-        for (i in books.length() - 1 downTo 0) {
-            val book = books.optJSONObject(i) ?: continue
-            val uri = Uri.parse(book.optString("uri"))
-            library.addView(Button(this).apply {
-                text = "📖  " + book.optString("title", "Untitled PDF")
-                isAllCaps = false
-                setOnClickListener { importPdf(uri) }
+        val books = bookLibrary.all()
+        if (books.isEmpty()) {
+            library.addView(TextView(this).apply {
+                text = "No books yet. Import a PDF to get started."
+                setTextColor(0xffadb7c9.toInt())
+                setPadding(0, 16, 0, 24)
             })
+        }
+        for (book in books.reversed()) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(8, 12, 8, 12)
+                setBackgroundColor(0xff252a36.toInt())
+            }
+            val image = ImageView(this).apply {
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                if (book.cover.exists()) setImageBitmap(BitmapFactory.decodeFile(book.cover.absolutePath))
+                else setImageResource(android.R.drawable.ic_menu_gallery)
+            }
+            row.addView(image, LinearLayout.LayoutParams(88, 120))
+            row.addView(TextView(this).apply {
+                text = book.title
+                textSize = 17f
+                setTextColor(Color.WHITE)
+                setPadding(16, 4, 8, 4)
+                maxLines = 3
+            }, LinearLayout.LayoutParams(0, -2, 1f))
+            row.setOnClickListener { openBook(book) }
+            row.setOnLongClickListener {
+                androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("Remove book?")
+                    .setMessage("Delete this book from local storage?")
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton("Remove") { _, _ ->
+                        if (documentId == book.id) {
+                            pause()
+                            ++generation
+                            documentId = ""
+                            chunks = emptyList()
+                            bookTitle.text = "No book selected"
+                            updateProgress()
+                        }
+                        bookLibrary.remove(book)
+                        refreshLibrary()
+                    }.show()
+                true
+            }
+            library.addView(row, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = 10 })
         }
     }
 
