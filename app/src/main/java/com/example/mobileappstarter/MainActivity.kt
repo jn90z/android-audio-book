@@ -241,8 +241,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         voiceButton = button("Voice ▾") { chooseVoice() }
         settingsRow.addView(voiceButton)
         bottomControls.addView(settingsRow)
-        mp3Button = button("Import / Play MP3") { showMp3Menu() }
+        mp3Button = button("Import MP3") {
+            val book = activeBook ?: return@button
+            if (mp3File(book).exists()) playMp3() else selectMp3.launch(arrayOf("audio/mpeg", "audio/*"))
+        }
+        mp3Button.setOnLongClickListener { showMp3Menu(); true }
         bottomControls.addView(mp3Button)
+        bottomControls.addView(button("MP3 options (pause / replace)") { showMp3Menu() })
         audioSeek = SeekBar(this).apply {
             max = 1000
             visibility = View.GONE
@@ -351,7 +356,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         pageNumber = 0
         pdfPage.setImageDrawable(null)
         showPage(0)
-        mp3Button.text = if (mp3File(book).exists()) "MP3 narration available" else "Import / Play MP3"
+        mp3Button.text = if (mp3File(book).exists()) "Play / Resume MP3" else "Import MP3"
         bookTitle.text = book.title
         readerHeader.text = book.title
         showReader()
@@ -703,10 +708,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val book = activeBook ?: return
         val choices = if (mp3File(book).exists())
             arrayOf("Play / resume MP3", "Pause MP3", "Replace MP3", "Use Android narration")
-        else arrayOf("Import downloaded MP3")
+        else arrayOf("Choose MP3 file")
         androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Audio for " + book.title)
-            .setMessage("MP3 playback works offline after import. Experimental read-along estimates word timing from text length. Page following is approximate and can drift when audio differs from the PDF.")
+            .setMessage("Imported MP3 files play offline. Read-along timing is experimental and may drift.")
             .setItems(choices) { _, choice ->
                 if (!mp3File(book).exists()) selectMp3.launch(arrayOf("audio/*"))
                 else when (choice) {
@@ -741,7 +746,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
                 if (request == generation && activeBook?.id == book.id) {
                     releaseMp3()
-                    mp3Button.text = "MP3 narration available"
+                    mp3Button.text = "Play / Resume MP3"
                     status.text = "MP3 imported. Tap MP3 narration to play."
                 }
             } catch (error: Exception) {
