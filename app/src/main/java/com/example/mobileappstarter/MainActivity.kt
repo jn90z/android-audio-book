@@ -41,6 +41,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var speedLabel: TextView
     private lateinit var library: LinearLayout
     private lateinit var libraryPanel: LinearLayout
+    private lateinit var libraryScroll: ScrollView
     private lateinit var readerPanel: LinearLayout
     private lateinit var readerHeader: TextView
     private lateinit var readerScroll: ScrollView
@@ -108,7 +109,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         libraryPanel.addView(button("＋  Import PDF") { openPdf.launch(arrayOf("application/pdf")) })
         library = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         libraryPanel.addView(library)
-        val libraryScroll = ScrollView(this).apply {
+        libraryScroll = ScrollView(this).apply {
             isFillViewport = true
             addView(libraryPanel)
         }
@@ -258,13 +259,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun showReader() {
         readerPanel.visibility = View.VISIBLE
-        (libraryPanel.parent?.parent as? View)?.visibility = View.GONE
+        libraryScroll.visibility = View.GONE
     }
 
     private fun showLibrary() {
         pause()
         readerPanel.visibility = View.GONE
-        (libraryPanel.parent?.parent as? View)?.visibility = View.VISIBLE
+        libraryScroll.visibility = View.VISIBLE
     }
 
     private fun importPdf(uri: Uri) {
