@@ -216,6 +216,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         voiceButton = button("Voice ▾") { chooseVoice() }
         settingsRow.addView(voiceButton)
         bottomControls.addView(settingsRow)
+        bottomControls.addView(button("🧪  Neural voice laboratory") {
+            if (reading) pause()
+            TtsExperiment.show(this, tts) { installNarrationListener() }
+        })
         readerPanel.addView(bottomControls)
         root.addView(readerPanel, LinearLayout.LayoutParams(-1, 0, 1f))
 
@@ -227,6 +231,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         setContentView(root)
         ViewCompat.requestApplyInsets(root)
         refreshLibrary()
+        installNarrationListener()
+    }
+
+    private fun installNarrationListener() {
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(id: String?) {}
             override fun onRangeStart(id: String?, start: Int, end: Int, frame: Int) {
@@ -255,7 +263,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
         })
-    }
 
     private fun showReader() {
         readerPanel.visibility = View.VISIBLE
