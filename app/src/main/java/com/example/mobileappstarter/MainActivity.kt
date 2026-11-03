@@ -263,6 +263,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 }
             }
         })
+    }
 
     private fun showReader() {
         readerPanel.visibility = View.VISIBLE
