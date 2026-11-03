@@ -11,6 +11,8 @@ import android.net.Uri
 import android.widget.*
 import android.graphics.BitmapFactory
 import android.view.Gravity
+import android.view.View
+import android.graphics.drawable.GradientDrawable
 import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
@@ -38,6 +40,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var play: Button
     private lateinit var speedLabel: TextView
     private lateinit var library: LinearLayout
+    private lateinit var libraryPanel: LinearLayout
+    private lateinit var readerPanel: LinearLayout
+    private lateinit var readerHeader: TextView
+    private lateinit var readerScroll: ScrollView
+    private lateinit var bottomControls: LinearLayout
+    private lateinit var voiceButton: Button
     private lateinit var bookTitle: TextView
     private lateinit var overall: ProgressBar
     private lateinit var pdfPage: HighlightPdfView
@@ -69,54 +77,124 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         PDFBoxResourceLoader.init(applicationContext)
         bookLibrary = BookLibrary(this)
         tts = TextToSpeech(this, this)
+        val navy = 0xff171b27.toInt()
+        val mint = 0xff63d7cb.toInt()
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(24, 28, 24, 32)
-            setBackgroundColor(0xff151820.toInt())
+            setBackgroundColor(navy)
         }
-        fun label(value: String, size: Float = 16f): TextView =
-            TextView(this).apply { text = value; textSize = size; setTextColor(0xfff2f3f7.toInt()); setPadding(0, 8, 0, 8) }
+        fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+        fun label(value: String, size: Float = 16f, color: Int = Color.WHITE): TextView =
+            TextView(this).apply {
+                text = value
+                textSize = size
+                setTextColor(color)
+                setPadding(dp(8), dp(8), dp(8), dp(8))
+            }
         fun button(value: String, action: () -> Unit): Button =
-            Button(this).apply { text = value; setOnClickListener { action() } }
-        root.addView(label("MY LIBRARY", 13f))
-        root.addView(label("Audio Book", 30f))
-        root.addView(label("Free • Offline • No account", 14f))
-        root.addView(button("＋  Add a PDF") { openPdf.launch(arrayOf("application/pdf")) })
+            Button(this).apply {
+                text = value
+                isAllCaps = false
+                setOnClickListener { action() }
+            }
+
+        libraryPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(16), dp(16), dp(16), dp(16))
+        }
+        libraryPanel.addView(label("MY LIBRARY", 13f, mint))
+        libraryPanel.addView(label("Audio Book", 30f))
+        libraryPanel.addView(label("Your books, always offline", 14f, 0xffb9c2d3.toInt()))
+        libraryPanel.addView(button("＋  Import PDF") { openPdf.launch(arrayOf("application/pdf")) })
         library = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        root.addView(library)
-        root.addView(label("NOW READING", 13f))
-        root.addView(button("☰  Table of contents / Jump to page") { showContents() })
+        libraryPanel.addView(library)
+        val libraryScroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(libraryPanel)
+        }
+        root.addView(libraryScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        readerPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+        }
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        header.addView(button("‹  Library") { showLibrary() })
+        readerHeader = label("Book Reader", 17f).apply {
+            gravity = Gravity.CENTER
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+        }
+        header.addView(readerHeader, LinearLayout.LayoutParams(0, -2, 1f))
+        header.addView(button("☰") { showContents() })
+        readerPanel.addView(header)
+
+        readerScroll = ScrollView(this).apply {
+            isFillViewport = false
+            setBackgroundColor(0xfff6f2e9.toInt())
+        }
+        val readingContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(12), dp(12), dp(18))
+        }
         pdfPage = HighlightPdfView(this).apply {
             adjustViewBounds = true
             scaleType = ImageView.ScaleType.FIT_CENTER
             setBackgroundColor(Color.WHITE)
         }
-        root.addView(pdfPage, LinearLayout.LayoutParams(-1, -2))
-        val pageControls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        pageControls.addView(button("◀ Page") { showPage(pageNumber - 1) }, LinearLayout.LayoutParams(0, -2, 1f))
-        pageIndicator = label("No page", 13f)
+        readingContent.addView(pdfPage, LinearLayout.LayoutParams(-1, -2))
+        val pageControls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        pageControls.addView(button("‹ Page") { showPage(pageNumber - 1) }, LinearLayout.LayoutParams(0, -2, 1f))
+        pageIndicator = label("No page", 13f, 0xff30313a.toInt()).apply { gravity = Gravity.CENTER }
         pageControls.addView(pageIndicator)
-        pageControls.addView(button("Page ▶") { showPage(pageNumber + 1) }, LinearLayout.LayoutParams(0, -2, 1f))
-        root.addView(pageControls)
-        root.addView(label("LIVE NARRATION", 13f))
-        spokenText = label("The spoken passage will appear here.", 16f)
-        root.addView(spokenText)
-        bookTitle = label("No book selected", 22f)
-        root.addView(bookTitle)
-        status = label("Choose a text-based PDF to start.")
-        progress = label("")
-        root.addView(status)
-        root.addView(progress)
-        overall = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply { max = 1000; progress = 0 }
-        root.addView(overall)
-        val controls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        controls.addView(button("Previous") { jump(-1) }, LinearLayout.LayoutParams(0, -2, 1f))
+        pageControls.addView(button("Page ›") { showPage(pageNumber + 1) }, LinearLayout.LayoutParams(0, -2, 1f))
+        readingContent.addView(pageControls)
+        spokenText = label("Narration text will appear here.", 15f, 0xff30313a.toInt())
+        readingContent.addView(spokenText)
+        readerScroll.addView(readingContent)
+        readerPanel.addView(readerScroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        bottomControls = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(6), dp(12), dp(8))
+            setBackgroundColor(navy)
+        }
+        bookTitle = label("No book selected", 16f)
+        bookTitle.maxLines = 1
+        bookTitle.ellipsize = android.text.TextUtils.TruncateAt.END
+        bottomControls.addView(bookTitle)
+        status = label("Choose a text-based PDF to start.", 12f, 0xffb9c2d3.toInt())
+        progress = label("", 12f, 0xffb9c2d3.toInt())
+        bottomControls.addView(status)
+        bottomControls.addView(progress)
+        overall = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+            max = 1000
+            progress = 0
+            progressTintList = android.content.res.ColorStateList.valueOf(mint)
+        }
+        bottomControls.addView(overall, LinearLayout.LayoutParams(-1, dp(4)))
+        val controls = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        controls.addView(button("⏮") { jump(-1) }, LinearLayout.LayoutParams(0, -2, 1f))
         play = button("Play") { if (reading) pause() else start() }
         controls.addView(play, LinearLayout.LayoutParams(0, -2, 1f))
-        controls.addView(button("Next") { jump(1) }, LinearLayout.LayoutParams(0, -2, 1f))
-        root.addView(controls)
-        speedLabel = label("Speed: 1.0×")
-        root.addView(speedLabel)
+        controls.addView(button("⏭") { jump(1) }, LinearLayout.LayoutParams(0, -2, 1f))
+        bottomControls.addView(controls)
+        val settingsRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        speedLabel = label("1.0× Speed", 13f)
+        settingsRow.addView(speedLabel)
         val seek = SeekBar(this).apply {
             max = 15
             progress = 5
@@ -124,8 +202,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
                     if (fromUser) {
                         speed = 0.5f + value / 10f
-                        speedLabel.text = "Speed: %.1f×".format(Locale.US, speed)
-                        tts.setSpeechRate(speed)
+                        speedLabel.text = "%.1f×".format(Locale.US, speed)
+                        if (initialized) tts.setSpeechRate(speed)
                         if (reading) speak()
                     }
                 }
@@ -133,21 +211,20 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 override fun onStopTrackingTouch(bar: SeekBar?) {}
             })
         }
-        root.addView(seek)
-        root.addView(button("Choose offline voice") { chooseVoice() })
-        val scroll = ScrollView(this).apply {
-            isFillViewport = true
-            setBackgroundColor(0xff151820.toInt())
-            addView(root)
-            clipToPadding = false
-        }
-        ViewCompat.setOnApplyWindowInsetsListener(scroll) { view, insets ->
+        settingsRow.addView(seek, LinearLayout.LayoutParams(0, dp(40), 1f))
+        voiceButton = button("Voice ▾") { chooseVoice() }
+        settingsRow.addView(voiceButton)
+        bottomControls.addView(settingsRow)
+        readerPanel.addView(bottomControls)
+        root.addView(readerPanel, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
             insets
         }
-        setContentView(scroll)
-        ViewCompat.requestApplyInsets(scroll)
+        setContentView(root)
+        ViewCompat.requestApplyInsets(root)
         refreshLibrary()
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(id: String?) {}
@@ -179,6 +256,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         })
     }
 
+    private fun showReader() {
+        libraryPanel.parent?.let { /* Library state remains in memory. */ }
+        readerPanel.visibility = View.VISIBLE
+        (libraryPanel.parent?.parent as? View)?.visibility = View.GONE
+    }
+
+    private fun showLibrary() {
+        pause()
+        readerPanel.visibility = View.GONE
+        (libraryPanel.parent?.parent as? View)?.visibility = View.VISIBLE
+    }
+
     private fun importPdf(uri: Uri) {
         pause()
         val request = ++generation
@@ -203,6 +292,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         pageNumber = 0
         showPage(0)
         bookTitle.text = book.title
+        readerHeader.text = book.title
+        showReader()
         chunks = emptyList()
         segments = emptyList()
         chapters = emptyList()
@@ -432,19 +523,34 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             status.text = "No installed offline voices found. Install voice data in Android settings."
             return
         }
-        val names = voices.map { "${it.locale.displayName} • ${it.name}" }.toTypedArray()
+        val names = voices.mapIndexed { index, voice ->
+            "${voice.locale.displayName} · Voice ${index + 1} · " +
+                (if (voice.quality >= Voice.QUALITY_HIGH) "High quality" else "Standard") +
+                " · Offline"
+        }.toTypedArray()
         androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Offline narration voice")
-            .setItems(names) { _, selected ->
-                val wasReading = reading
-                if (wasReading) pause()
-                val result = tts.setVoice(voices[selected])
-                status.text = if (result == TextToSpeech.SUCCESS) "Voice: ${voices[selected].name}"
-                              else "Could not select voice."
-                if (wasReading && result == TextToSpeech.SUCCESS) start()
+            .setSingleChoiceItems(names, -1) { dialog, selected ->
+                dialog.dismiss()
+                selectVoice(voices[selected])
+            }
+            .setNeutralButton("Preview current") { _, _ ->
+                tts.speak("This is how your audiobook will sound.", TextToSpeech.QUEUE_FLUSH, null, "voice-preview")
             }
             .setNegativeButton("Cancel", null)
             .show()
+    }
+
+    private fun selectVoice(voice: Voice) {
+        val wasReading = reading
+        if (wasReading) pause()
+        val result = tts.setVoice(voice)
+        status.text = if (result == TextToSpeech.SUCCESS) "Voice selected: ${voice.locale.displayName}"
+                      else "Could not select voice."
+        if (result == TextToSpeech.SUCCESS) {
+            tts.speak("This is how your audiobook will sound.", TextToSpeech.QUEUE_FLUSH, null, "voice-preview")
+        }
+        // Selection does not resume automatically: preview and playback must not overlap.
     }
 
     private fun currentId() = "$generation:$position"
