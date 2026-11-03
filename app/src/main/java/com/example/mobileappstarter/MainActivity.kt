@@ -4,6 +4,7 @@ import android.content.Intent
 import android.provider.OpenableColumns
 import org.json.JSONArray
 import android.os.Bundle
+import android.speech.tts.Voice
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.net.Uri
@@ -129,6 +130,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             })
         }
         root.addView(seek)
+        root.addView(button("Choose offline voice") { chooseVoice() })
         val scroll = ScrollView(this).apply { addView(root) }
         setContentView(scroll)
         refreshLibrary()
@@ -335,6 +337,33 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             span.setSpan(BackgroundColorSpan(0xffe8c66a.toInt()), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
         spokenText.text = span
+    }
+
+    private fun chooseVoice() {
+        if (!initialized) {
+            status.text = "Speech engine is not ready."
+            return
+        }
+        val voices = tts.voices.orEmpty()
+            .filter { !it.isNetworkConnectionRequired && it.locale.language == Locale.getDefault().language }
+            .sortedWith(compareBy<Voice> { it.locale.displayName }.thenBy { it.name })
+        if (voices.isEmpty()) {
+            status.text = "No installed offline voices found. Install voice data in Android settings."
+            return
+        }
+        val names = voices.map { "${it.locale.displayName} • ${it.name}" }.toTypedArray()
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Offline narration voice")
+            .setItems(names) { _, selected ->
+                val wasReading = reading
+                if (wasReading) pause()
+                val result = tts.setVoice(voices[selected])
+                status.text = if (result == TextToSpeech.SUCCESS) "Voice: ${voices[selected].name}"
+                              else "Could not select voice."
+                if (wasReading && result == TextToSpeech.SUCCESS) start()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
     }
 
     private fun currentId() = "$generation:$position"
