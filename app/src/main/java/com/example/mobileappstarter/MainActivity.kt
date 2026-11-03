@@ -691,7 +691,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         else arrayOf("Import downloaded MP3")
         androidx.appcompat.app.AlertDialog.Builder(this)
             .setTitle("Audio for " + book.title)
-            .setMessage("MP3 playback works offline after import. Page navigation remains manual; automatic word highlighting and page synchronization are not available for imported audio yet.")
+            .setMessage("MP3 playback works offline after import. Experimental read-along estimates word timing from text length. Page following is approximate and can drift when audio differs from the PDF.")
             .setItems(choices) { _, choice ->
                 if (!mp3File(book).exists()) selectMp3.launch(arrayOf("audio/*"))
                 else when (choice) {
@@ -809,6 +809,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         persist()
         updateProgress()
         if (reading) speak()
+        else if (mp3Playing) seekAudioToSection(position)
     }
     private fun persist() {
         if (documentId.isNotEmpty()) getPreferences(MODE_PRIVATE).edit().putInt(documentId, position).apply()
