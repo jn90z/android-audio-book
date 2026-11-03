@@ -212,7 +212,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         lifecycleScope.launch {
             try {
                 val (extracted, outline) = withContext(Dispatchers.IO) {
-                    Pair(ReadingIndex.extract(book.pdf), ChapterIndex.extract(book.pdf))
+                    Pair(ReadingIndex.extract(book.pdf), runCatching { ChapterIndex.extract(book.pdf) }.getOrDefault(emptyList()))
                 }
                 if (request != generation) return@launch
                 segments = extracted
