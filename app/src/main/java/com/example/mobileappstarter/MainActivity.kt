@@ -77,6 +77,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private val audioHandler = Handler(Looper.getMainLooper())
     private var audioTick: Runnable? = null
     private var audioTimeline = LongArray(0)
+    private var lastAudioHighlightSection = -1
+    private var lastAudioHighlightStart = -1
+    private var lastAudioHighlightEnd = -1
     private lateinit var audioSeek: SeekBar
     private lateinit var mp3Button: Button
     private val selectMp3 = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -339,6 +342,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun openBook(book: LocalBook) {
         pause()
         releaseMp3()
+        lastAudioHighlightSection = -1
+        lastAudioHighlightStart = -1
+        lastAudioHighlightEnd = -1
         val request = ++generation
         activeBook = book
         documentId = book.id
@@ -455,6 +461,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun showPage(requested: Int) {
         val book = activeBook ?: return
+        if (requested == pageNumber && pdfPage.drawable != null) return
         val currentGeneration = generation
         val renderRequest = ++pageRenderRequest
         lifecycleScope.launch {
@@ -639,7 +646,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             override fun run() {
                 if (!mp3Playing) return
                 updateAudioReadAlong()
-                audioHandler.postDelayed(this, 300L)
+                audioHandler.postDelayed(this, 400L)
             }
         }
         audioTick = ticker
@@ -676,8 +683,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val match = Regex("\\S+").find(text, approximate)
         utteranceStart = match?.range?.first ?: approximate
         utteranceEnd = match?.range?.last?.plus(1) ?: approximate
-        highlightPassage()
-        updatePdfHighlight()
+        if (lastAudioHighlightSection != position ||
+            lastAudioHighlightStart != utteranceStart ||
+            lastAudioHighlightEnd != utteranceEnd) {
+            lastAudioHighlightSection = position
+            lastAudioHighlightStart = utteranceStart
+            lastAudioHighlightEnd = utteranceEnd
+            highlightPassage()
+            updatePdfHighlight()
+        }
         if (!audioSeek.isPressed) audioSeek.progress = (elapsed * 1000L / duration).toInt()
     }
 
@@ -705,6 +719,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
     private fun importMp3(uri: Uri) {
         val book = activeBook ?: return
+        releaseMp3()
         val request = generation
         lifecycleScope.launch {
             try {
