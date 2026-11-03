@@ -3,6 +3,8 @@
     <application
         android:allowBackup="false"
         android:label="Audio Book"
+        android:icon="@drawable/ic_audio_book"
+        android:roundIcon="@drawable/ic_audio_book"
         android:supportsRtl="true"
         android:theme="@style/Theme.MobileAppStarter"
         android:usesCleartextTraffic="false">
