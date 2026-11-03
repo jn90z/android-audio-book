@@ -37,13 +37,13 @@ object TtsExperiment {
                 }
             }
             .setNeutralButton("Run speech test") { _, _ ->
-                runBenchmark(activity, currentTts)
+                runBenchmark(activity, currentTts, onReinitialize)
             }
             .setNegativeButton("Close", null)
             .show()
     }
 
-    private fun runBenchmark(activity: Activity, tts: TextToSpeech) {
+    private fun runBenchmark(activity: Activity, tts: TextToSpeech, onReinitialize: () -> Unit) {
         val started = SystemClock.elapsedRealtime()
         val id = "tts-lab-${SystemClock.elapsedRealtime()}"
         // Keep the experiment isolated: restore the reader's listener after the test.
