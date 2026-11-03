@@ -614,6 +614,73 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         // Selection does not resume automatically: preview and playback must not overlap.
     }
 
+
+    private fun buildAudioTimeline() {
+        var sum = 0L
+        audioTimeline = LongArray(chunks.size + 1)
+        chunks.forEachIndexed { index, value ->
+            sum += value.length.coerceAtLeast(1).toLong()
+            audioTimeline[index + 1] = sum
+        }
+    }
+
+    private fun seekAudioToSection(section: Int) {
+        val player = mp3Player ?: return
+        if (audioTimeline.size != chunks.size + 1 || chunks.isEmpty()) return
+        val total = audioTimeline.last().coerceAtLeast(1L)
+        val offset = player.duration.toLong() * audioTimeline[section.coerceIn(0, chunks.lastIndex)] / total
+        player.seekTo(offset.toInt())
+        updateAudioReadAlong()
+    }
+
+    private fun startAudioTicker() {
+        stopAudioTicker()
+        val ticker = object : Runnable {
+            override fun run() {
+                if (!mp3Playing) return
+                updateAudioReadAlong()
+                audioHandler.postDelayed(this, 300L)
+            }
+        }
+        audioTick = ticker
+        audioHandler.post(ticker)
+    }
+
+    private fun stopAudioTicker() {
+        audioTick?.let { audioHandler.removeCallbacks(it) }
+        audioTick = null
+    }
+
+    private fun updateAudioReadAlong() {
+        val player = mp3Player ?: return
+        if (chunks.isEmpty() || audioTimeline.size != chunks.size + 1) return
+        val duration = player.duration.toLong()
+        if (duration <= 0L) return
+        val elapsed = player.currentPosition.toLong().coerceIn(0L, duration)
+        val target = elapsed * audioTimeline.last() / duration
+        var low = 0
+        var high = chunks.lastIndex
+        while (low < high) {
+            val middle = (low + high + 1) / 2
+            if (audioTimeline[middle] <= target) low = middle else high = middle - 1
+        }
+        if (position != low) {
+            position = low
+            persist()
+            updateProgress()
+        }
+        val sectionLength = (audioTimeline[position + 1] - audioTimeline[position]).coerceAtLeast(1L)
+        val fraction = (target - audioTimeline[position]).coerceIn(0L, sectionLength)
+        val text = chunks[position]
+        val approximate = (text.length * fraction / sectionLength).toInt().coerceIn(0, text.length)
+        val match = Regex("\\S+").find(text, approximate)
+        utteranceStart = match?.range?.first ?: approximate
+        utteranceEnd = match?.range?.last?.plus(1) ?: approximate
+        highlightPassage()
+        updatePdfHighlight()
+        if (!audioSeek.isPressed) audioSeek.progress = (elapsed * 1000L / duration).toInt()
+    }
+
     private fun mp3File(book: LocalBook): File =
         File(File(filesDir, "book-audio"), book.id.replace(Regex("[^a-zA-Z0-9_-]"), "_") + ".mp3")
 
