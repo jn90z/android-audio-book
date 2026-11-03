@@ -349,6 +349,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         activeBook = book
         documentId = book.id
         pageNumber = 0
+        pdfPage.setImageDrawable(null)
         showPage(0)
         mp3Button.text = if (mp3File(book).exists()) "MP3 narration available" else "Import / Play MP3"
         bookTitle.text = book.title
