@@ -29,3 +29,26 @@ References:
 - https://github.com/siva-sub/NekoTTS
 
 **Not implemented yet:** in-app ONNX inference or model downloads. This branch is currently a research and test plan.
+
+## Website evaluation: voice-generator.com (2026-11-03)
+
+- Homepage: https://voice-generator.com/
+- Advertises free unlimited generation, MP3 export, no signup, and named voices (Adam, Puck, Liam, Heart, Bella, Jessica, Echo, Eric, Fenrir, Michael, Onyx, Santa, Alloy, Aoede, Kore, Nicole, Nova, River, Sarah).
+- Terms (https://voice-generator.com/terms) state: “Voices powered by Kokoro under the Apache 2.0 License.”
+- **Do not assume** the website's source code, API, voice branding, or every voice file is open source. The model's license does not automatically license the website or other assets.
+- No supported public integration API was confirmed. Do not scrape website generation endpoints or embed a dependency on the website.
+- Preferred independent implementation: run a licensed Kokoro ONNX model locally on Android, evaluate sherpa-onnx Android runtime, and keep the existing Android TTS engine as a fallback.
+- Verify exact model weights, voice pack, phonemizer, dependencies, and Android redistribution rights before committing binaries or packaging releases.
+
+### Proposed architecture
+
+1. Add a `NarrationEngine` abstraction with `speak(text)`, `stop()`, `setSpeed()`, `selectVoice()`, and playback events.
+2. Retain `AndroidTtsEngine` as fallback and baseline.
+3. Prototype `KokoroOnnxEngine` on this branch only; download/install model assets separately from the APK where licensing permits.
+4. Synthesize short sections on-device, cache audio locally, and play through Android Media3.
+5. Measure alignment drift: synthesized audio does not inherently provide Android `onRangeStart` callbacks. Implement word timestamps or alignment before claiming accurate PDF word highlighting.
+6. Keep airplane-mode functionality, model download size, thermal behavior, and battery usage as acceptance gates.
+
+### Initial decision
+
+Prioritize **Kokoro ONNX / sherpa-onnx** for natural voice quality and **Piper** for lower-end device performance. No website API integration planned.
