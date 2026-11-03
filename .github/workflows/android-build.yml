@@ -21,7 +21,31 @@ jobs:
         with:
           gradle-version: "8.13"
       - run: gradle --no-daemon testDebugUnitTest assembleDebug
+      - name: Restore persistent distribution signing key
+        if: ${{ github.event_name != 'pull_request' && env.HAS_KEYSTORE == 'true' }}
+        run: |
+          echo "$AUDIOBOOK_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/audiobook-release.jks"
+        env:
+          AUDIOBOOK_KEYSTORE_BASE64: ${{ secrets.AUDIOBOOK_KEYSTORE_BASE64 }}
+          HAS_KEYSTORE: ${{ secrets.AUDIOBOOK_KEYSTORE_BASE64 != '' }}
+      - name: Build updateable signed release APK
+        if: ${{ github.event_name != 'pull_request' && env.HAS_KEYSTORE == 'true' }}
+        run: gradle --no-daemon assembleRelease
+        env:
+          HAS_KEYSTORE: ${{ secrets.AUDIOBOOK_KEYSTORE_BASE64 != '' }}
+          AUDIOBOOK_KEYSTORE_PATH: ${{ runner.temp }}/audiobook-release.jks
+          AUDIOBOOK_KEYSTORE_PASSWORD: ${{ secrets.AUDIOBOOK_KEYSTORE_PASSWORD }}
+          AUDIOBOOK_KEY_ALIAS: ${{ secrets.AUDIOBOOK_KEY_ALIAS }}
+          AUDIOBOOK_KEY_PASSWORD: ${{ secrets.AUDIOBOOK_KEY_PASSWORD }}
+      - name: Upload signed release APK
+        if: ${{ github.event_name != 'pull_request' && env.HAS_KEYSTORE == 'true' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: audio-book-signed-release-apk
+          path: app/build/outputs/apk/release/app-release.apk
+        env:
+          HAS_KEYSTORE: ${{ secrets.AUDIOBOOK_KEYSTORE_BASE64 != '' }}
       - uses: actions/upload-artifact@v6
         with:
-          name: mobile-app-starter-debug-apk
+          name: audio-book-debug-apk-unstable-signing
           path: app/build/outputs/apk/debug/app-debug.apk
