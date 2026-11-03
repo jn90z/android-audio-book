@@ -257,7 +257,6 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun showReader() {
-        libraryPanel.parent?.let { /* Library state remains in memory. */ }
         readerPanel.visibility = View.VISIBLE
         (libraryPanel.parent?.parent as? View)?.visibility = View.GONE
     }
@@ -523,8 +522,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             status.text = "No installed offline voices found. Install voice data in Android settings."
             return
         }
-        val names = voices.mapIndexed { index, voice ->
-            "${voice.locale.displayName} · Voice ${index + 1} · " +
+        val voiceNumbers = mutableMapOf<String, Int>()
+        val names = voices.map { voice ->
+            val localeKey = voice.locale.toLanguageTag()
+            val number = (voiceNumbers[localeKey] ?: 0) + 1
+            voiceNumbers[localeKey] = number
+            "${voice.locale.displayName} · Voice $number · " +
                 (if (voice.quality >= Voice.QUALITY_HIGH) "High quality" else "Standard") +
                 " · Offline"
         }.toTypedArray()
@@ -542,8 +545,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun selectVoice(voice: Voice) {
-        val wasReading = reading
-        if (wasReading) pause()
+        if (reading) pause()
         val result = tts.setVoice(voice)
         status.text = if (result == TextToSpeech.SUCCESS) "Voice selected: ${voice.locale.displayName}"
                       else "Could not select voice."
@@ -603,6 +605,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             initialized = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
         }
     }
+    @Deprecated("Legacy Android back callback")
+    override fun onBackPressed() {
+        if (readerPanel.visibility == View.VISIBLE) showLibrary()
+        else super.onBackPressed()
+    }
+
     override fun onDestroy() {
         pause()
         tts.shutdown()
