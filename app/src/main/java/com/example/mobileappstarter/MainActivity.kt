@@ -20,6 +20,8 @@ import android.text.style.BackgroundColorSpan
 import android.text.Spanned
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
 import com.tom_roush.pdfbox.pdmodel.PDDocument
@@ -49,6 +51,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var segments = emptyList<ReadingSegment>()
     private var chunks = emptyList<String>()
     private var pageRenderRequest = 0
+    private var chapters = emptyList<BookChapter>()
     private var position = 0
     private var reading = false
     private var initialized = false
@@ -82,6 +85,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         library = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(library)
         root.addView(label("NOW READING", 13f))
+        root.addView(button("☰  Table of contents / Jump to page") { showContents() })
         pdfPage = HighlightPdfView(this).apply {
             adjustViewBounds = true
             scaleType = ImageView.ScaleType.FIT_CENTER
@@ -131,8 +135,19 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         root.addView(seek)
         root.addView(button("Choose offline voice") { chooseVoice() })
-        val scroll = ScrollView(this).apply { addView(root) }
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            setBackgroundColor(0xff151820.toInt())
+            addView(root)
+            clipToPadding = false
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(scroll) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom)
+            insets
+        }
         setContentView(scroll)
+        ViewCompat.requestApplyInsets(scroll)
         refreshLibrary()
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(id: String?) {}
@@ -190,14 +205,18 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         bookTitle.text = book.title
         chunks = emptyList()
         segments = emptyList()
+        chapters = emptyList()
         position = 0
         status.text = "Loading PDF…"
         updateProgress()
         lifecycleScope.launch {
             try {
-                val extracted = withContext(Dispatchers.IO) { ReadingIndex.extract(book.pdf) }
+                val (extracted, outline) = withContext(Dispatchers.IO) {
+                    Pair(ReadingIndex.extract(book.pdf), ChapterIndex.extract(book.pdf))
+                }
                 if (request != generation) return@launch
                 segments = extracted
+                chapters = outline
                 chunks = extracted.map { it.text }
                 position = getPreferences(MODE_PRIVATE).getInt(documentId, 0)
                     .coerceIn(0, (chunks.size - 1).coerceAtLeast(0))
@@ -271,6 +290,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             documentId = ""
                             chunks = emptyList()
                             segments = emptyList()
+                            chapters = emptyList()
                             activeBook = null
                             pdfPage.setImageDrawable(null)
                             bookTitle.text = "No book selected"
@@ -352,6 +372,52 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             span.setSpan(BackgroundColorSpan(0xffe8c66a.toInt()), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
         spokenText.text = span
+    }
+
+    private fun jumpToPage(page: Int) {
+        val target = page.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
+        val next = segments.indexOfFirst { it.page >= target }
+        val wasReading = reading
+        if (wasReading) pause()
+        if (next >= 0) {
+            position = next
+            utteranceStart = 0
+            utteranceEnd = 0
+            persist()
+            updateProgress()
+        }
+        showPage(target)
+        if (wasReading && next >= 0) start()
+    }
+
+    private fun showContents() {
+        if (activeBook == null) {
+            status.text = "Open a book first."
+            return
+        }
+        val items = chapters.map { "  ".repeat(it.depth) + it.title + "  ·  p. ${it.page + 1}" }
+        val labels = (listOf("Jump to page…") + items).toTypedArray()
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle(if (chapters.isEmpty()) "Pages" else "Table of contents")
+            .setItems(labels) { _, selected ->
+                if (selected == 0) {
+                    val input = EditText(this).apply {
+                        inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                        hint = "1–$pageCount"
+                    }
+                    androidx.appcompat.app.AlertDialog.Builder(this)
+                        .setTitle("Jump to page")
+                        .setView(input)
+                        .setNegativeButton("Cancel", null)
+                        .setPositiveButton("Go") { _, _ ->
+                            val page = input.text.toString().toIntOrNull()
+                            if (page != null && page in 1..pageCount) jumpToPage(page - 1)
+                            else status.text = "Enter a page from 1 to $pageCount."
+                        }.show()
+                } else jumpToPage(chapters[selected - 1].page)
+            }
+            .setNegativeButton("Close", null)
+            .show()
     }
 
     private fun chooseVoice() {
