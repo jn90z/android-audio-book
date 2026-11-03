@@ -45,7 +45,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var pageCount = 0
     private var utteranceStart = 0
     private var utteranceEnd = 0
+    private var segments = emptyList<ReadingSegment>()
     private var chunks = emptyList<String>()
+    private var pageRenderRequest = 0
     private var position = 0
     private var reading = false
     private var initialized = false
@@ -184,22 +186,23 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         showPage(0)
         bookTitle.text = book.title
         chunks = emptyList()
+        segments = emptyList()
         position = 0
         status.text = "Loading PDF…"
         updateProgress()
         lifecycleScope.launch {
             try {
-                val text = withContext(Dispatchers.IO) {
-                    PDDocument.load(book.pdf).use { PDFTextStripper().getText(it) }
-                }
+                val extracted = withContext(Dispatchers.IO) { ReadingIndex.extract(book.pdf) }
                 if (request != generation) return@launch
-                chunks = chunk(text)
+                segments = extracted
+                chunks = extracted.map { it.text }
                 position = getPreferences(MODE_PRIVATE).getInt(documentId, 0)
                     .coerceIn(0, (chunks.size - 1).coerceAtLeast(0))
                 status.text = if (chunks.isEmpty()) "No selectable text. OCR is planned."
                               else "Ready to listen • ${chunks.size} sections"
                 updateProgress()
                 highlightPassage()
+                followNarrationPage()
             } catch (e: Exception) {
                 if (request == generation) status.text = "Load failed: ${e.localizedMessage}"
             }
@@ -264,6 +267,9 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                             ++generation
                             documentId = ""
                             chunks = emptyList()
+                            segments = emptyList()
+                            activeBook = null
+                            pdfPage.setImageDrawable(null)
                             bookTitle.text = "No book selected"
                             updateProgress()
                         }
@@ -279,6 +285,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun showPage(requested: Int) {
         val book = activeBook ?: return
         val currentGeneration = generation
+        val renderRequest = ++pageRenderRequest
         lifecycleScope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
@@ -298,16 +305,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         }
                     }
                 }
-                if (currentGeneration == generation) {
+                if (currentGeneration == generation && renderRequest == pageRenderRequest) {
                     pdfPage.setImageBitmap(result.first)
                     pageNumber = result.second
                     pageCount = result.third
                     pageIndicator.text = " ${pageNumber + 1} / $pageCount "
                 } else result.first.recycle()
             } catch (e: Exception) {
-                if (currentGeneration == generation) pageIndicator.text = "PDF preview unavailable"
+                if (currentGeneration == generation && renderRequest == pageRenderRequest) pageIndicator.text = "PDF preview unavailable"
             }
         }
+    }
+
+    private fun followNarrationPage() {
+        val target = segments.getOrNull(position)?.page ?: return
+        if (target != pageNumber) showPage(target)
     }
 
     private fun highlightPassage() {
@@ -331,6 +343,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         utteranceStart = 0
         utteranceEnd = 0
         highlightPassage()
+        followNarrationPage()
         tts.setSpeechRate(speed)
         tts.speak(chunks[position], TextToSpeech.QUEUE_FLUSH, null, currentId())
         updateProgress()
@@ -362,6 +375,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun updateProgress() {
         progress.text = if (chunks.isEmpty()) "" else "Section ${position.coerceAtMost(chunks.size - 1) + 1} of ${chunks.size}"
         if (::spokenText.isInitialized) highlightPassage()
+        if (segments.isNotEmpty()) followNarrationPage()
         overall.progress = if (chunks.isEmpty()) 0 else ((position.coerceAtMost(chunks.size) * 1000L) / chunks.size).toInt()
     }
     override fun onInit(code: Int) {
