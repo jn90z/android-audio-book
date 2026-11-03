@@ -107,6 +107,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         libraryPanel.addView(label("Audio Book", 30f))
         libraryPanel.addView(label("Your books, always offline", 14f, 0xffb9c2d3.toInt()))
         libraryPanel.addView(button("＋  Import PDF") { openPdf.launch(arrayOf("application/pdf")) })
+        libraryPanel.addView(Button(this).apply {
+            text = "Generate Audiobook (Website)"
+            isAllCaps = false
+            setOnClickListener {
+                val url = Uri.parse("https://voice-generator.com/pdf-to-audio")
+                startActivity(Intent(Intent.ACTION_VIEW, url))
+            }
+        })
         library = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         libraryPanel.addView(library)
         libraryScroll = ScrollView(this).apply {
