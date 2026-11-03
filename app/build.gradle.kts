@@ -9,12 +9,26 @@ android {
         applicationId = "com.example.mobileappstarter"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1) + 1000
+        versionName = "0.2.${System.getenv("GITHUB_RUN_NUMBER") ?: "0"}"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+    signingConfigs {
+        create("distribution") {
+            val path = System.getenv("AUDIOBOOK_KEYSTORE_PATH")
+            if (!path.isNullOrBlank()) {
+                storeFile = file(path)
+                storePassword = System.getenv("AUDIOBOOK_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("AUDIOBOOK_KEY_ALIAS")
+                keyPassword = System.getenv("AUDIOBOOK_KEY_PASSWORD")
+            }
+        }
     }
     buildTypes {
         release {
+            if (!System.getenv("AUDIOBOOK_KEYSTORE_PATH").isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("distribution")
+            }
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
