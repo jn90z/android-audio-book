@@ -2,6 +2,8 @@ package com.example.mobileappstarter
 
 import android.content.Intent
 import android.media.MediaPlayer
+import android.os.Handler
+import android.os.Looper
 import java.io.File
 import android.provider.OpenableColumns
 import org.json.JSONArray
@@ -72,6 +74,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private var generation = 0
     private var mp3Player: MediaPlayer? = null
     private var mp3Playing = false
+    private val audioHandler = Handler(Looper.getMainLooper())
+    private var audioTick: Runnable? = null
+    private var audioTimeline = LongArray(0)
+    private lateinit var audioSeek: SeekBar
     private lateinit var mp3Button: Button
     private val selectMp3 = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) importMp3(uri)
@@ -234,6 +240,25 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         bottomControls.addView(settingsRow)
         mp3Button = button("Import / Play MP3") { showMp3Menu() }
         bottomControls.addView(mp3Button)
+        audioSeek = SeekBar(this).apply {
+            max = 1000
+            visibility = View.GONE
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar?, value: Int, fromUser: Boolean) {
+                    if (fromUser) {
+                        val player = mp3Player ?: return
+                        val duration = player.duration
+                        if (duration > 0) {
+                            player.seekTo((duration.toLong() * value / 1000L).toInt())
+                            updateAudioReadAlong()
+                        }
+                    }
+                }
+                override fun onStartTrackingTouch(bar: SeekBar?) {}
+                override fun onStopTrackingTouch(bar: SeekBar?) {}
+            })
+        }
+        bottomControls.addView(audioSeek)
         bottomControls.addView(button("🧪  Neural voice laboratory") {
             if (reading) pause()
             TtsExperiment.show(this, tts) { installNarrationListener() }
@@ -338,6 +363,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 segments = extracted
                 chapters = outline
                 chunks = extracted.map { it.text }
+                buildAudioTimeline()
                 position = getPreferences(MODE_PRIVATE).getInt(documentId, 0)
                     .coerceIn(0, (chunks.size - 1).coerceAtLeast(0))
                 status.text = if (chunks.isEmpty()) "No selectable text. OCR is planned."
@@ -498,6 +524,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         val target = page.coerceIn(0, (pageCount - 1).coerceAtLeast(0))
         val next = segments.indexOfFirst { it.page >= target }
         val wasReading = reading
+        val wasAudio = mp3Playing
         if (wasReading) pause()
         if (next >= 0) {
             position = next
@@ -508,6 +535,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
         showPage(target)
         if (wasReading && next >= 0) start()
+        if (wasAudio && next >= 0) seekAudioToSection(next)
     }
 
     private fun showContents() {
@@ -649,13 +677,17 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                     prepare()
                     setOnCompletionListener {
                         mp3Playing = false
+                        stopAudioTicker()
                         status.text = "MP3 finished"
                     }
                 }
             }
             mp3Player?.start()
             mp3Playing = true
-            status.text = "Playing imported MP3 • PDF pages are manual"
+            audioSeek.visibility = View.VISIBLE
+            buildAudioTimeline()
+            startAudioTicker()
+            status.text = "MP3 read-along • estimated timing"
         } catch (error: Exception) {
             releaseMp3()
             status.text = "MP3 playback failed: " + error.localizedMessage
@@ -663,11 +695,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     private fun pauseMp3() {
+        stopAudioTicker()
         if (mp3Playing) mp3Player?.pause()
         mp3Playing = false
     }
 
     private fun releaseMp3() {
+        stopAudioTicker()
+        if (::audioSeek.isInitialized) audioSeek.visibility = View.GONE
         mp3Player?.release()
         mp3Player = null
         mp3Playing = false
