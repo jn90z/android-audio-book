@@ -10,6 +10,8 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    env:
+      HAS_KEYSTORE: ${{ secrets.AUDIOBOOK_KEYSTORE_BASE64 != '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-java@v5
