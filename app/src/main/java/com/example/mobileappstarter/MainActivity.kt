@@ -550,6 +550,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         status.text = if (result == TextToSpeech.SUCCESS) "Voice selected: ${voice.locale.displayName}"
                       else "Could not select voice."
         if (result == TextToSpeech.SUCCESS) {
+            getSharedPreferences("narration_settings", MODE_PRIVATE).edit().putString("voice_name", voice.name).apply()
             tts.speak("This is how your audiobook will sound.", TextToSpeech.QUEUE_FLUSH, null, "voice-preview")
         }
         // Selection does not resume automatically: preview and playback must not overlap.
@@ -600,9 +601,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
     override fun onInit(code: Int) {
         initialized = code == TextToSpeech.SUCCESS
-        if (initialized) {
-            val result = tts.setLanguage(Locale.getDefault())
-            initialized = result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED
+        if (!initialized) return
+        val savedName = getSharedPreferences("narration_settings", MODE_PRIVATE)
+            .getString("voice_name", null)
+        val savedVoice = tts.voices.orEmpty().firstOrNull {
+            it.name == savedName && !it.isNetworkConnectionRequired
+        }
+        if (savedVoice != null && tts.setVoice(savedVoice) == TextToSpeech.SUCCESS) {
+            if (::status.isInitialized) status.text = "Offline voice restored"
+            return
+        }
+        val result = tts.setLanguage(Locale.getDefault())
+        initialized = result != TextToSpeech.LANG_MISSING_DATA &&
+            result != TextToSpeech.LANG_NOT_SUPPORTED
+        if (savedName != null && ::status.isInitialized) {
+            status.text = "Saved voice unavailable; using device default."
         }
     }
     @Deprecated("Legacy Android back callback")
