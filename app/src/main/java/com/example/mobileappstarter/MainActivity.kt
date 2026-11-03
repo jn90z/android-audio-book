@@ -38,7 +38,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var library: LinearLayout
     private lateinit var bookTitle: TextView
     private lateinit var overall: ProgressBar
-    private lateinit var pdfPage: ImageView
+    private lateinit var pdfPage: HighlightPdfView
     private lateinit var spokenText: TextView
     private lateinit var pageIndicator: TextView
     private var activeBook: LocalBook? = null
@@ -82,7 +82,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         library = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(library)
         root.addView(label("NOW READING", 13f))
-        pdfPage = ImageView(this).apply {
+        pdfPage = HighlightPdfView(this).apply {
             adjustViewBounds = true
             scaleType = ImageView.ScaleType.FIT_CENTER
             setBackgroundColor(Color.WHITE)
@@ -142,6 +142,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                         utteranceStart = start
                         utteranceEnd = end
                         highlightPassage()
+                        updatePdfHighlight()
                     }
                 }
             }
@@ -284,6 +285,8 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private data class RenderedPage(val bitmap: Bitmap, val page: Int, val count: Int, val width: Float, val height: Float)
+
     private fun showPage(requested: Int) {
         val book = activeBook ?: return
         val currentGeneration = generation
@@ -302,17 +305,22 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                                 val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
                                 bitmap.eraseColor(Color.WHITE)
                                 p.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                                Triple(bitmap, page, count)
+                                RenderedPage(bitmap, page, count, p.width.toFloat(), p.height.toFloat())
                             }
                         }
                     }
                 }
                 if (currentGeneration == generation && renderRequest == pageRenderRequest) {
-                    pdfPage.setImageBitmap(result.first)
-                    pageNumber = result.second
-                    pageCount = result.third
+                    pdfPage.setImageBitmap(result.bitmap)
+                    pdfPage.bitmapWidth = result.bitmap.width.toFloat()
+                    pdfPage.bitmapHeight = result.bitmap.height.toFloat()
+                    pdfPage.pdfWidth = result.width
+                    pdfPage.pdfHeight = result.height
+                    pageNumber = result.page
+                    pageCount = result.count
+                    updatePdfHighlight()
                     pageIndicator.text = " ${pageNumber + 1} / $pageCount "
-                } else result.first.recycle()
+                } else result.bitmap.recycle()
             } catch (e: Exception) {
                 if (currentGeneration == generation && renderRequest == pageRenderRequest) pageIndicator.text = "PDF preview unavailable"
             }
@@ -322,6 +330,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun followNarrationPage() {
         val target = segments.getOrNull(position)?.page ?: return
         if (target != pageNumber) showPage(target)
+    }
+
+    private fun updatePdfHighlight() {
+        val segment = segments.getOrNull(position)
+        pdfPage.activeWord = if (segment != null && segment.page == pageNumber && reading)
+            ReadingIndex.wordAt(segment, utteranceStart)?.rect
+        else null
     }
 
     private fun highlightPassage() {
@@ -373,6 +388,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         utteranceEnd = 0
         highlightPassage()
         followNarrationPage()
+        updatePdfHighlight()
         tts.setSpeechRate(speed)
         tts.speak(chunks[position], TextToSpeech.QUEUE_FLUSH, null, currentId())
         updateProgress()
@@ -389,6 +405,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         reading = false
         if (::tts.isInitialized) tts.stop()
         if (::play.isInitialized) play.text = "Play"
+        if (::pdfPage.isInitialized) pdfPage.activeWord = null
         persist()
     }
     private fun jump(amount: Int) {
