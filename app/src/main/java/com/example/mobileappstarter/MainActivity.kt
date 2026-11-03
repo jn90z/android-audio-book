@@ -11,6 +11,13 @@ import android.widget.*
 import android.graphics.BitmapFactory
 import android.view.Gravity
 import android.graphics.Color
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
+import android.graphics.Bitmap
+import android.text.SpannableString
+import android.text.style.BackgroundColorSpan
+import android.text.Spanned
+import android.speech.tts.UtteranceProgressListener
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -31,6 +38,14 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var library: LinearLayout
     private lateinit var bookTitle: TextView
     private lateinit var overall: ProgressBar
+    private lateinit var pdfPage: ImageView
+    private lateinit var spokenText: TextView
+    private lateinit var pageIndicator: TextView
+    private var activeBook: LocalBook? = null
+    private var pageNumber = 0
+    private var pageCount = 0
+    private var utteranceStart = 0
+    private var utteranceEnd = 0
     private var chunks = emptyList<String>()
     private var position = 0
     private var reading = false
@@ -65,6 +80,21 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         library = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         root.addView(library)
         root.addView(label("NOW READING", 13f))
+        pdfPage = ImageView(this).apply {
+            adjustViewBounds = true
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setBackgroundColor(Color.WHITE)
+        }
+        root.addView(pdfPage, LinearLayout.LayoutParams(-1, -2))
+        val pageControls = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
+        pageControls.addView(button("◀ Page") { showPage(pageNumber - 1) }, LinearLayout.LayoutParams(0, -2, 1f))
+        pageIndicator = label("No page", 13f)
+        pageControls.addView(pageIndicator)
+        pageControls.addView(button("Page ▶") { showPage(pageNumber + 1) }, LinearLayout.LayoutParams(0, -2, 1f))
+        root.addView(pageControls)
+        root.addView(label("LIVE NARRATION", 13f))
+        spokenText = label("The spoken passage will appear here.", 16f)
+        root.addView(spokenText)
         bookTitle = label("No book selected", 22f)
         root.addView(bookTitle)
         status = label("Choose a text-based PDF to start.")
@@ -103,6 +133,15 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         refreshLibrary()
         tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
             override fun onStart(id: String?) {}
+            override fun onRangeStart(id: String?, start: Int, end: Int, frame: Int) {
+                runOnUiThread {
+                    if (reading && id == currentId()) {
+                        utteranceStart = start
+                        utteranceEnd = end
+                        highlightPassage()
+                    }
+                }
+            }
             override fun onError(id: String?) { runOnUiThread { if (id == currentId()) { pause(); status.text = "Speech playback failed." } } }
             override fun onDone(id: String?) {
                 runOnUiThread {
@@ -140,7 +179,10 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private fun openBook(book: LocalBook) {
         pause()
         val request = ++generation
+        activeBook = book
         documentId = book.id
+        pageNumber = 0
+        showPage(0)
         bookTitle.text = book.title
         chunks = emptyList()
         position = 0
@@ -158,6 +200,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
                 status.text = if (chunks.isEmpty()) "No selectable text. OCR is planned."
                               else "Ready to listen • ${chunks.size} sections"
                 updateProgress()
+                highlightPassage()
             } catch (e: Exception) {
                 if (request == generation) status.text = "Load failed: ${e.localizedMessage}"
             }
@@ -234,9 +277,61 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    private fun showPage(requested: Int) {
+        val book = activeBook ?: return
+        val currentGeneration = generation
+        lifecycleScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    ParcelFileDescriptor.open(book.pdf, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                        PdfRenderer(descriptor).use { renderer ->
+                            val count = renderer.pageCount
+                            val page = requested.coerceIn(0, (count - 1).coerceAtLeast(0))
+                            if (count == 0) error("PDF has no pages")
+                            renderer.openPage(page).use { p ->
+                                val width = 900
+                                val height = (width.toFloat() * p.height / p.width).toInt().coerceAtLeast(1)
+                                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                                bitmap.eraseColor(Color.WHITE)
+                                p.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                                Triple(bitmap, page, count)
+                            }
+                        }
+                    }
+                }
+                if (currentGeneration == generation) {
+                    pdfPage.setImageBitmap(result.first)
+                    pageNumber = result.second
+                    pageCount = result.third
+                    pageIndicator.text = " ${pageNumber + 1} / $pageCount "
+                } else result.first.recycle()
+            } catch (e: Exception) {
+                if (currentGeneration == generation) pageIndicator.text = "PDF preview unavailable"
+            }
+        }
+    }
+
+    private fun highlightPassage() {
+        if (position !in chunks.indices) {
+            spokenText.text = "Choose a book to begin."
+            return
+        }
+        val content = chunks[position]
+        val span = SpannableString(content)
+        val from = utteranceStart.coerceIn(0, content.length)
+        val to = utteranceEnd.coerceIn(from, content.length)
+        if (to > from) {
+            span.setSpan(BackgroundColorSpan(0xffe8c66a.toInt()), from, to, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        spokenText.text = span
+    }
+
     private fun currentId() = "$generation:$position"
     private fun speak() {
         if (!initialized || position !in chunks.indices) return
+        utteranceStart = 0
+        utteranceEnd = 0
+        highlightPassage()
         tts.setSpeechRate(speed)
         tts.speak(chunks[position], TextToSpeech.QUEUE_FLUSH, null, currentId())
         updateProgress()
@@ -267,6 +362,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
     private fun updateProgress() {
         progress.text = if (chunks.isEmpty()) "" else "Section ${position.coerceAtMost(chunks.size - 1) + 1} of ${chunks.size}"
+        if (::spokenText.isInitialized) highlightPassage()
         overall.progress = if (chunks.isEmpty()) 0 else ((position.coerceAtMost(chunks.size) * 1000L) / chunks.size).toInt()
     }
     override fun onInit(code: Int) {
